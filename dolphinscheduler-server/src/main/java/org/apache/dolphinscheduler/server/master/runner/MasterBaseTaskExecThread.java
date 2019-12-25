@@ -114,21 +114,37 @@ public class MasterBaseTaskExecThread implements Callable<Boolean> {
         Integer commitRetryInterval = masterConfig.getMasterTaskCommitInterval();
 
         int retryTimes = 1;
-
+        boolean submitDB = false;
+        boolean submitQueue = false;
+        TaskInstance task = null;
         while (retryTimes <= commitRetryTimes){
             try {
-                TaskInstance task = processDao.submitTask(taskInstance, processInstance);
-                if(task != null){
+                if(!submitDB){
+                    // submit task to db
+                    task = processDao.submitTask(taskInstance, processInstance);
+                    if(task != null && task.getId() != 0){
+                        submitDB = true;
+                    }
+                }
+                if(submitDB && !submitQueue){
+                    // submit task to queue
+                    submitQueue = processDao.submitTaskToQueue(task);
+                }
+                if(submitDB && submitQueue){
                     return task;
                 }
-                logger.error("task commit to mysql and queue failed , task has already retry {} times, please check the database", commitRetryTimes);
+                if(!submitDB){
+                    logger.error("task commit to db failed , taskId {} has already retry {} times, please check the database", taskInstance.getId(), retryTimes);
+                }else if(!submitQueue){
+                    logger.error("task commit to queue failed , taskId {} has already retry {} times, please check the queue", taskInstance.getId(), retryTimes);
+                }
                 Thread.sleep(commitRetryInterval);
             } catch (Exception e) {
                 logger.error("task commit to mysql and queue failed : " + e.getMessage(),e);
             }
             retryTimes += 1;
         }
-        return null;
+        return task;
     }
 
     /**
