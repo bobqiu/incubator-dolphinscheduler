@@ -20,20 +20,17 @@ import org.apache.dolphinscheduler.common.Constants;
 import org.apache.dolphinscheduler.common.enums.ExecutionStatus;
 import org.apache.dolphinscheduler.common.thread.ThreadUtils;
 import org.apache.dolphinscheduler.common.utils.HadoopUtils;
+import org.apache.dolphinscheduler.common.utils.StringUtils;
 import org.apache.dolphinscheduler.dao.ProcessDao;
 import org.apache.dolphinscheduler.dao.entity.TaskInstance;
 import org.apache.dolphinscheduler.server.utils.LoggerUtils;
 import org.apache.dolphinscheduler.server.utils.ProcessUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 
 import java.io.*;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Date;
-import java.util.List;
+import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -207,7 +204,14 @@ public abstract class AbstractCommandExecutor {
         // merge error information to standard output stream
         processBuilder.redirectErrorStream(true);
         // setting up user to run commands
-        processBuilder.command("sudo", "-u", tenantCode, commandType(), commandFile);
+        List<String> command = new LinkedList<>();
+        command.add("sudo");
+        command.add("-u");
+        command.add(tenantCode);
+        command.add(commandInterpreter());
+        command.addAll(commandOptions());
+        command.add(commandFile);
+        processBuilder.command(command);
 
         process = processBuilder.start();
 
@@ -292,7 +296,7 @@ public abstract class AbstractCommandExecutor {
 
                 Runtime.getRuntime().exec(cmd);
             } catch (IOException e) {
-                logger.info("kill attempt failed." + e.getMessage(), e);
+                logger.info("kill attempt failed", e);
             }
         }
 
@@ -312,7 +316,7 @@ public abstract class AbstractCommandExecutor {
 
                 Runtime.getRuntime().exec(cmd);
             } catch (IOException e) {
-                logger.error("kill attempt failed." + e.getMessage(), e);
+                logger.error("kill attempt failed ", e);
             }
         }
     }
@@ -407,7 +411,7 @@ public abstract class AbstractCommandExecutor {
                 }
            }
         } catch (Exception e) {
-            logger.error(String.format("yarn applications: %s  status failed : " + e.getMessage(), appIds.toString()),e);
+            logger.error(String.format("yarn applications: %s  status failed ", appIds.toString()),e);
             result = false;
         }
         return result;
@@ -559,9 +563,11 @@ public abstract class AbstractCommandExecutor {
         }
     }
 
-
+    protected List<String> commandOptions() {
+        return Collections.emptyList();
+    }
     protected abstract String buildCommandFilePath();
-    protected abstract String commandType();
+    protected abstract String commandInterpreter();
     protected abstract boolean checkFindApp(String line);
     protected abstract void createCommandFileIfNotExists(String execCommand, String commandFile) throws IOException;
 }

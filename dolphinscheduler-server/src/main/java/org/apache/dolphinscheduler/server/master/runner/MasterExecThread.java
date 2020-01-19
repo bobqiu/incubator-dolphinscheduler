@@ -17,8 +17,8 @@
 package org.apache.dolphinscheduler.server.master.runner;
 
 import com.alibaba.fastjson.JSONObject;
+import com.google.common.collect.Lists;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.dolphinscheduler.common.Constants;
 import org.apache.dolphinscheduler.common.enums.*;
 import org.apache.dolphinscheduler.common.graph.DAG;
@@ -30,11 +30,12 @@ import org.apache.dolphinscheduler.common.thread.ThreadUtils;
 import org.apache.dolphinscheduler.common.utils.*;
 import org.apache.dolphinscheduler.dao.ProcessDao;
 import org.apache.dolphinscheduler.dao.entity.ProcessInstance;
+import org.apache.dolphinscheduler.dao.entity.Schedule;
 import org.apache.dolphinscheduler.dao.entity.TaskInstance;
 import org.apache.dolphinscheduler.dao.utils.DagHelper;
 import org.apache.dolphinscheduler.server.master.config.MasterConfig;
 import org.apache.dolphinscheduler.server.utils.AlertManager;
-import org.apache.dolphinscheduler.server.utils.SpringApplicationContext;
+import org.apache.dolphinscheduler.server.utils.ScheduleUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -172,7 +173,7 @@ public class MasterExecThread implements Runnable {
                 executeProcess();
             }
         }catch (Exception e){
-            logger.error("master exec thread exception: " + e.getMessage(), e);
+            logger.error("master exec thread exception", e);
             logger.error("process execute failed, process id:{}", processInstance.getId());
             processInstance.setState(ExecutionStatus.FAILURE);
             processInstance.setEndTime(new Date());
@@ -205,10 +206,30 @@ public class MasterExecThread implements Runnable {
         Date startDate = DateUtils.getScheduleDate(cmdParam.get(CMDPARAM_COMPLEMENT_DATA_START_DATE));
         Date endDate = DateUtils.getScheduleDate(cmdParam.get(CMDPARAM_COMPLEMENT_DATA_END_DATE));
         processDao.saveProcessInstance(processInstance);
-        Date scheduleDate = processInstance.getScheduleTime();
 
-        if(scheduleDate == null){
-            scheduleDate = startDate;
+        // get schedules
+        int processDefinitionId = processInstance.getProcessDefinitionId();
+        List<Schedule> schedules = processDao.queryReleaseSchedulerListByProcessDefinitionId(processDefinitionId);
+        List<Date> listDate = Lists.newLinkedList();
+        if(!CollectionUtils.isEmpty(schedules)){
+            for (Schedule schedule : schedules) {
+                List<Date> list = ScheduleUtils.getRecentTriggerTime(schedule.getCrontab(), startDate, endDate);
+                listDate.addAll(list);
+            }
+        }
+        // get first fire date
+        Iterator<Date> iterator = null;
+        Date scheduleDate = null;
+        if(!CollectionUtils.isEmpty(listDate)) {
+            iterator = listDate.iterator();
+            scheduleDate = iterator.next();
+            processInstance.setScheduleTime(scheduleDate);
+            processDao.updateProcessInstance(processInstance);
+        }else{
+            scheduleDate = processInstance.getScheduleTime();
+            if(scheduleDate == null){
+                scheduleDate = startDate;
+            }
         }
 
         while(Stopper.isRunning()){
@@ -233,12 +254,23 @@ public class MasterExecThread implements Runnable {
                 break;
             }
 
-            //  current process instance sucess ，next execute
-            scheduleDate = DateUtils.getSomeDay(scheduleDate, 1);
-            if(scheduleDate.after(endDate)){
-                // all success
-                logger.info("process {} complement completely!", processInstance.getId());
-                break;
+            //  current process instance success ,next execute
+            if(null == iterator){
+                // loop by day
+                scheduleDate = DateUtils.getSomeDay(scheduleDate, 1);
+                if(scheduleDate.after(endDate)){
+                    // all success
+                    logger.info("process {} complement completely!", processInstance.getId());
+                    break;
+                }
+            }else{
+                // loop by schedule date
+                if(!iterator.hasNext()){
+                    // all success
+                    logger.info("process {} complement completely!", processInstance.getId());
+                    break;
+                }
+                scheduleDate = iterator.next();
             }
 
             logger.info("process {} start to complement {} data",
@@ -357,7 +389,7 @@ public class MasterExecThread implements Runnable {
             try {
                 FileUtils.deleteDirectory(new File(execLocalPath));
             } catch (IOException e) {
-                logger.error("delete exec dir failed : " + e.getMessage(), e);
+                logger.error("delete exec dir failed ", e);
             }
         }
     }
@@ -543,7 +575,7 @@ public class MasterExecThread implements Runnable {
     private DependResult isTaskDepsComplete(String taskName) {
 
         Collection<String> startNodes = dag.getBeginNode();
-        // ff the vertex returns true directly
+        // if the vertex returns true directly
         if(startNodes.contains(taskName)){
             return DependResult.SUCCESS;
         }
@@ -735,7 +767,7 @@ public class MasterExecThread implements Runnable {
             Date endTime = DateUtils.getScheduleDate(cmdParam.get(CMDPARAM_COMPLEMENT_DATA_END_DATE));
             return processInstance.getScheduleTime().equals(endTime);
         } catch (Exception e) {
-            logger.error("complement end failed : " + e.getMessage(),e);
+            logger.error("complement end failed ",e);
             return false;
         }
     }
@@ -1007,7 +1039,7 @@ public class MasterExecThread implements Runnable {
                 return task;
             }
         }catch (Exception e){
-            logger.error("get recovery task instance failed : " + e.getMessage(),e);
+            logger.error("get recovery task instance failed ",e);
         }
         return null;
     }
