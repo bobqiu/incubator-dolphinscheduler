@@ -109,6 +109,43 @@
             <span>({{$t('Minute')}})</span>
           </div>
         </div>
+        <div class="clearfix list" v-if="taskType === 'CONDITIONS'">
+          <div class="text-box">
+            <span>{{$t('State')}}</span>
+          </div>
+          <div class="cont-box">
+            <span class="label-box" style="width: 193px;display: inline-block;">
+              <x-select style="width: 157px;" v-model="successNode" :disabled="true">
+              <x-option v-for="item in stateList" :key="item.value" :value="item.value" :label="item.label">
+              </x-option>
+            </x-select>
+            </span>
+            <span class="text-b" style="padding-left: 38px">{{$t('Branch flow')}}</span>
+            <x-select style="width: 157px;" v-model="successBranch" clearable>
+              <x-option v-for="item in rearList" :key="item.value" :value="item.value" :label="item.label">
+              </x-option>
+            </x-select>
+          </div>
+        </div>
+
+        <div class="clearfix list" v-if="taskType === 'CONDITIONS'">
+          <div class="text-box">
+            <span>{{$t('State')}}</span>
+          </div>
+          <div class="cont-box">
+            <span class="label-box" style="width: 193px;display: inline-block;">
+              <x-select style="width: 157px;" v-model="failedNode" :disabled="true">
+              <x-option v-for="item in stateList" :key="item.value" :value="item.value" :label="item.label">
+              </x-option>
+            </x-select>
+            </span>
+            <span class="text-b" style="padding-left: 38px">{{$t('Branch flow')}}</span>
+            <x-select style="width: 157px;" v-model="failedBranch" clearable>
+              <x-option v-for="item in rearList" :key="item.value" :value="item.value" :label="item.label">
+              </x-option>
+            </x-select>
+          </div>
+        </div>
 
         <!-- Task timeout alarm -->
         <m-timeout-alarm
@@ -121,6 +158,7 @@
         <m-shell
           v-if="taskType === 'SHELL'"
           @on-params="_onParams"
+          @on-cache-params="_onCacheParams"
           ref="SHELL"
           :backfill-item="backfillItem">
         </m-shell>
@@ -128,6 +166,7 @@
         <m-sub-process
           v-if="taskType === 'SUB_PROCESS'"
           @on-params="_onParams"
+          @on-cache-params="_onCacheParams"
           @on-set-process-name="_onSetProcessName"
           ref="SUB_PROCESS"
           :backfill-item="backfillItem">
@@ -136,6 +175,7 @@
         <m-procedure
           v-if="taskType === 'PROCEDURE'"
           @on-params="_onParams"
+          @on-cache-params="_onCacheParams"
           ref="PROCEDURE"
           :backfill-item="backfillItem">
         </m-procedure>
@@ -167,6 +207,7 @@
         <m-mr
           v-if="taskType === 'MR'"
           @on-params="_onParams"
+          @on-cache-params="_onCacheParams"
           ref="MR"
           :backfill-item="backfillItem">
         </m-mr>
@@ -174,6 +215,7 @@
         <m-python
           v-if="taskType === 'PYTHON'"
           @on-params="_onParams"
+          @on-cache-params="_onCacheParams"
           ref="PYTHON"
           :backfill-item="backfillItem">
         </m-python>
@@ -181,6 +223,7 @@
         <m-dependent
           v-if="taskType === 'DEPENDENT'"
           @on-dependent="_onDependent"
+          @on-cache-dependent="_onCacheDependent"
           ref="DEPENDENT"
           :backfill-item="backfillItem">
         </m-dependent>
@@ -191,7 +234,27 @@
           ref="HTTP"
           :backfill-item="backfillItem">
         </m-http>
-
+        <m-datax
+          v-if="taskType === 'DATAX'"
+          @on-params="_onParams"
+          @on-cache-params="_onCacheParams"
+          ref="DATAX"
+          :backfill-item="backfillItem">
+        </m-datax>
+        <m-sqoop
+          v-if="taskType === 'SQOOP'"
+          @on-params="_onParams"
+          @on-cache-params="_onCacheParams"
+          ref="SQOOP"
+          :backfill-item="backfillItem">
+        </m-sqoop>
+        <m-conditions
+          v-if="taskType === 'CONDITIONS'"
+          ref="CONDITIONS"
+          @on-dependent="_onDependent"
+          :backfill-item="backfillItem"
+          :pre-node="preNode">
+        </m-conditions>
       </div>
     </div>
     <div class="bottom-box">
@@ -216,6 +279,9 @@
   import mProcedure from './tasks/procedure'
   import mDependent from './tasks/dependent'
   import mHttp from './tasks/http'
+  import mDatax from './tasks/datax'
+  import mConditions from './tasks/conditions'
+  import mSqoop from './tasks/sqoop'
   import mSubProcess from './tasks/sub_process'
   import mSelectInput from './_source/selectInput'
   import mTimeoutAlarm from './_source/timeoutAlarm'
@@ -232,15 +298,25 @@
         // loading
         spinnerLoading: false,
         // node name
-        name: ``,
+        name: '',
         // description
         description: '',
         // Node echo data
         backfillItem: {},
         // Resource(list)
         resourcesList: [],
+        successNode: 'success',
+        failedNode: 'failed',
+        successBranch: '',
+        failedBranch: '',
+        conditionResult: {
+          'successNode': [],
+          'failedNode': []
+        },
         // dependence
         dependence: {},
+        // cache dependence
+        cacheDependence: {},
         // Current node params data
         params: {},
         // Running sign
@@ -256,7 +332,17 @@
         // Task priority
         taskInstancePriority: 'MEDIUM',
         // worker group id
-        workerGroupId: -1
+        workerGroupId: -1,
+        stateList:[
+          {
+            value: 'success',
+            label: `${i18n.$t('success')}`
+          },
+          {
+            value: 'failed',
+            label: `${i18n.$t('failed')}`
+          }
+        ]
       }
     },
     /**
@@ -267,7 +353,9 @@
     props: {
       id: Number,
       taskType: String,
-      self: Object
+      self: Object,
+      preNode: Array,
+      rearList: Array
     },
     methods: {
       /**
@@ -275,6 +363,12 @@
        */
       _onDependent (o) {
         this.dependence = Object.assign(this.dependence, {}, o)
+      },
+      /**
+       * cache dependent
+       */
+      _onCacheDependent (o) {
+        this.cacheDependence = Object.assign(this.cacheDependence, {}, o)
       },
       /**
        * Task timeout alarm
@@ -349,9 +443,10 @@
             type: this.taskType,
             id: this.id,
             name: this.name,
+            params: this.params,
             description: this.description,
             runFlag: this.runFlag,
-            dependence: this.dependence,
+            dependence: this.cacheDependence,
             maxRetryTimes: this.maxRetryTimes,
             retryInterval: this.retryInterval,
             timeout: this.timeout,
@@ -367,6 +462,10 @@
       _verifName () {
         if (!_.trim(this.name)) {
           this.$message.warning(`${i18n.$t('Please enter name (required)')}`)
+          return false
+        }
+        if (this.successBranch !='' && this.successBranch == this.failedBranch) {
+          this.$message.warning(`${i18n.$t('Cannot select the same node for successful branch flow and failed branch flow')}`)
           return false
         }
         if (this.name === this.backfillItem.name) {
@@ -397,6 +496,8 @@
         }
 
         $(`#${this.id}`).find('span').text(this.name)
+        this.conditionResult.successNode[0] = this.successBranch
+        this.conditionResult.failedNode[0] = this.failedBranch
         // Store the corresponding node data structure
         this.$emit('addTaskInfo', {
           item: {
@@ -406,12 +507,15 @@
             params: this.params,
             description: this.description,
             runFlag: this.runFlag,
+            conditionResult: this.conditionResult,
             dependence: this.dependence,
             maxRetryTimes: this.maxRetryTimes,
             retryInterval: this.retryInterval,
             timeout: this.timeout,
             taskInstancePriority: this.taskInstancePriority,
-            workerGroupId: this.workerGroupId
+            workerGroupId: this.workerGroupId,
+            status: this.status,
+            branch: this.branch
           },
           fromThis: this
         })
@@ -496,7 +600,10 @@
         this.description = o.description
         this.maxRetryTimes = o.maxRetryTimes
         this.retryInterval = o.retryInterval
-
+        if(o.conditionResult) {
+          this.successBranch = o.conditionResult.successNode[0]
+          this.failedBranch = o.conditionResult.failedNode[0]
+        }
           // If the workergroup has been deleted, set the default workergroup
           var hasMatch = false;
           for (let i = 0; i < this.store.state.security.workerGroupsListAll.length; i++) {
@@ -515,6 +622,7 @@
 
         this.params = o.params || {}
         this.dependence = o.dependence || {}
+        this.cacheDependence = o.dependence || {}
 
       }
       this.isContentBox = true
@@ -544,7 +652,7 @@
           name: this.name,
           description: this.description,
           runFlag: this.runFlag,
-          dependence: this.dependence,
+          dependence: this.cacheDependence,
           maxRetryTimes: this.maxRetryTimes,
           retryInterval: this.retryInterval,
           timeout: this.timeout,
@@ -565,6 +673,9 @@
       mPython,
       mDependent,
       mHttp,
+      mDatax,
+      mSqoop,
+      mConditions,
       mSelectInput,
       mTimeoutAlarm,
       mPriority,
